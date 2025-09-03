@@ -63,7 +63,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             val (name, qty) = parseSpokenItem(phrase)
             if (name.isNotBlank()) {
                 lifecycleScope.launch { dao.upsert(Item(name = name, qty = qty)) }
-                speak("Agregado: $qty $name")
+                speak(buildAddedSpeech(name, qty))
+
             }
         }
     }
@@ -124,10 +125,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         Button(
                             onClick = {
                                 val pendientes = items.filter { !it.purchased }
-                                val texto = if (pendientes.isEmpty())
+                                val texto = if (pendientes.isEmpty()) {
                                     "No hay pendientes."
-                                else pendientes.joinToString(". ") { "${it.qty} ${it.name}" }
+                                } else {
+                                    pendientes.joinToString(". ") { it.name + " (" + it.qty + ")" }
+                                }
                                 speak("Te faltan: $texto")
+
                             },
                             enabled = ttsReady.value
                         ) { Text("Leer pendientes") }
@@ -137,6 +141,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         Button(onClick = { tryVoiceAdd() }) {
                             Text("Agregar por voz")
                         }
+                        Spacer(Modifier.width(8.dp))
+                        Button(onClick = { shareList(items) }) { Text("Compartir") }
+
 
                         Spacer(Modifier.width(8.dp))
 
@@ -241,15 +248,77 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         voiceLauncher.launch(intent)
     }
 
+    // Reemplaza tu parseSpokenItem por este mejorado
     private fun parseSpokenItem(phrase: String): Pair<String, Int> {
-        val tokens = phrase.trim().split(" ").filter { it.isNotBlank() }
-        val maybeQty = tokens.lastOrNull()?.toIntOrNull()
-        return if (maybeQty != null && tokens.size > 1) {
-            tokens.dropLast(1).joinToString(" ") to maybeQty
-        } else {
-            phrase to 1
+        val p = phrase.lowercase().trim()
+
+        fun wordToInt(w: String): Int? = when (w) {
+            "un", "uno", "una" -> 1
+            "dos" -> 2
+            "tres" -> 3
+            "cuatro" -> 4
+            "cinco" -> 5
+            "seis" -> 6
+            "siete" -> 7
+            "ocho" -> 8
+            "nueve" -> 9
+            "diez" -> 10
+            else -> null
         }
+
+
+
+
+        val raw = p.split(Regex("\\s+")).filter { it.isNotBlank() }
+
+        // "<nombre> <cantidad>"  (leche 2 / yerba dos)
+        val tailNum = raw.lastOrNull()?.let { it.toIntOrNull() ?: wordToInt(it) }
+        if (tailNum != null && raw.size > 1) {
+            val name = raw.dropLast(1)
+                .filterNot { it in listOf("de", "del", "la", "el", "los", "las") }
+                .joinToString(" ")
+            return name to tailNum
+        }
+
+        // "<cantidad> (de) <nombre>"  (dos litros de leche / 3 pan)
+        val headNum = raw.firstOrNull()?.let { it.toIntOrNull() ?: wordToInt(it) }
+        if (headNum != null) {
+            val name = raw.drop(1)
+                .filterNot { it in listOf("de", "del", "la", "el", "los", "las") }
+                .joinToString(" ")
+            return (name.ifBlank { p }) to headNum
+        }
+
+        // Sin cantidad -> 1
+        val name = raw.filterNot { it in listOf("de", "del", "la", "el", "los", "las") }
+            .joinToString(" ")
+            .ifBlank { p }
+        return name to 1
     }
+
+    private fun shareList(items: List<Item>) {
+        val texto = if (items.isEmpty()) {
+            "Lista vacía"
+        } else {
+            items.joinToString("\n") { i ->
+                val marca = if (i.purchased) "✓" else "•"
+                val qty = if (i.qty == 1) "" else " (${i.qty})"
+                "$marca ${i.name}$qty"
+            }
+        }
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, texto)
+        }
+        startActivity(Intent.createChooser(intent, "Compartir lista"))
+    }
+
+
+    // Para que no diga "uno leche"
+    private fun buildAddedSpeech(name: String, qty: Int): String =
+        if (qty == 1) "Agregado: $name" else "Agregado: $qty $name"
+
+
 
     override fun onDestroy() {
         tts?.stop()
