@@ -8,6 +8,7 @@ import android.speech.tts.TextToSpeech
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,12 +16,20 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardOptions
+
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import kotlinx.coroutines.launch
+import androidx.compose.ui.text.input.KeyboardType
+import java.util.Locale
+
+import androidx.compose.runtime.rememberCoroutineScope
+
 
 // ===== ENTIDAD ROOM =====
 @Entity(tableName = "items")
@@ -64,7 +73,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             if (name.isNotBlank()) {
                 lifecycleScope.launch { dao.upsert(Item(name = name, qty = qty)) }
                 speak(buildAddedSpeech(name, qty))
-
             }
         }
     }
@@ -75,7 +83,20 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         dao = AppDatabase.get(this).itemDao()
 
         setContent {
+            val scope = rememberCoroutineScope()
             val items by dao.observeAll().collectAsState(initial = emptyList())
+
+            // Ordenamos pendientes arriba (purchased=false) y luego por nombre (case-insensitive)
+            val uiItems = remember(items) {
+                items.sortedWith(
+                    compareBy<Item> { it.purchased }
+                        .thenBy { it.name.lowercase() }
+                )
+            }
+
+            // Estado para diálogo de edición
+            var editing by remember { mutableStateOf<Item?>(null) }
+            var newName by remember { mutableStateOf("") }
 
             MaterialTheme {
                 Column(
@@ -93,6 +114,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             value = nameInput.value,
                             onValueChange = { nameInput.value = it },
                             label = { Text("Producto") },
+                            singleLine = true,
                             modifier = Modifier.weight(1f)
                         )
                         Spacer(Modifier.width(8.dp))
@@ -102,6 +124,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                 qtyInput.value = s.filter { it.isDigit() }.ifEmpty { "1" }
                             },
                             label = { Text("Cant.") },
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Number,
+                                imeAction = ImeAction.Done
+                            ),
+                            singleLine = true,
                             modifier = Modifier.width(90.dp)
                         )
                         Spacer(Modifier.width(8.dp))
@@ -109,9 +136,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             val name = nameInput.value.trim()
                             val qty = qtyInput.value.toIntOrNull() ?: 1
                             if (name.isNotEmpty()) {
-                                lifecycleScope.launch {
-                                    dao.upsert(Item(name = name, qty = qty))
-                                }
+                                scope.launch { dao.upsert(Item(name = name, qty = qty)) }
                                 nameInput.value = ""
                                 qtyInput.value = "1"
                             }
@@ -121,29 +146,34 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     Spacer(Modifier.height(12.dp))
 
                     // Acciones
-                    Row {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Button(
                             onClick = {
-                                val pendientes = items.filter { !it.purchased }
+                                val pendientes = uiItems.filter { !it.purchased }
                                 val texto = if (pendientes.isEmpty()) {
                                     "No hay pendientes."
                                 } else {
                                     pendientes.joinToString(". ") { it.name + " (" + it.qty + ")" }
                                 }
-                                speak("Te faltan: $texto")
-
+                                val encabezado = if (pendientes.size == 1) "Te falta: " else "Te faltan: "
+                                speak(encabezado + texto)
                             },
                             enabled = ttsReady.value
                         ) { Text("Leer pendientes") }
 
                         Spacer(Modifier.width(8.dp))
 
-                        Button(onClick = { tryVoiceAdd() }) {
-                            Text("Agregar por voz")
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Button(onClick = { shareList(items) }) { Text("Compartir") }
+                        Button(onClick = { tryVoiceAdd() }) { Text("Agregar por voz") }
 
+                        Spacer(Modifier.width(8.dp))
+
+                        Button(onClick = { shareList(uiItems) }) { Text("Compartir") }
+
+                        Spacer(Modifier.width(8.dp))
+
+                        Button(onClick = { scope.launch { dao.deletePurchased() } }) {
+                            Text("Eliminar comprados")
+                        }
 
                         Spacer(Modifier.width(8.dp))
 
@@ -161,7 +191,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        items(items, key = { it.id }) { item ->
+                        items(uiItems, key = { it.id }) { item ->
                             ListItem(
                                 headlineContent = { Text("${item.name} x${item.qty}") },
                                 supportingContent = {
@@ -171,20 +201,60 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                     Checkbox(
                                         checked = item.purchased,
                                         onCheckedChange = {
-                                            lifecycleScope.launch {
-                                                dao.setPurchased(item.id, !item.purchased)
-                                            }
+                                            scope.launch { dao.setPurchased(item.id, !item.purchased) }
                                         }
                                     )
                                 },
                                 trailingContent = {
-                                    TextButton(onClick = {
-                                        lifecycleScope.launch { dao.deleteById(item.id) }
-                                    }) { Text("Eliminar") }
-                                }
+                                    Row {
+                                        TextButton(onClick = {
+                                            editing = item
+                                            newName = item.name
+                                        }) { Text("Editar") }
+
+                                        TextButton(onClick = {
+                                            scope.launch { dao.deleteById(item.id) }
+                                        }) { Text("Eliminar") }
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        editing = item
+                                        newName = item.name
+                                    }
                             )
                             Divider()
                         }
+                    }
+
+                    // Diálogo de edición
+                    if (editing != null) {
+                        AlertDialog(
+                            onDismissRequest = { editing = null },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    val current = editing!!
+                                    val nn = newName.trim()
+                                    if (nn.isNotEmpty()) {
+                                        scope.launch { dao.rename(current.id, nn) }
+                                    }
+                                    editing = null
+                                }) { Text("Guardar") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { editing = null }) { Text("Cancelar") }
+                            },
+                            title = { Text("Editar ítem") },
+                            text = {
+                                OutlinedTextField(
+                                    value = newName,
+                                    onValueChange = { newName = it },
+                                    singleLine = true,
+                                    label = { Text("Nombre") }
+                                )
+                            }
+                        )
                     }
                 }
             }
@@ -194,12 +264,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     // ===== Text-to-Speech =====
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            val res = tts?.setLanguage(java.util.Locale("es", "AR"))
+            val res = tts?.setLanguage(Locale("es", "AR"))
             val ok = res != TextToSpeech.LANG_MISSING_DATA && res != TextToSpeech.LANG_NOT_SUPPORTED
             if (!ok) {
-                val resEs = tts?.setLanguage(java.util.Locale("es", "ES"))
+                val resEs = tts?.setLanguage(Locale("es", "ES"))
                 if (resEs == TextToSpeech.LANG_MISSING_DATA || resEs == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    tts?.language = java.util.Locale.US
+                    tts?.language = Locale.US
                     missingLang.value = true
                     statusText.value =
                         "Faltan voces en español. Tocá 'Instalar voz' o probalo en un celular."
@@ -248,7 +318,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         voiceLauncher.launch(intent)
     }
 
-    // Reemplaza tu parseSpokenItem por este mejorado
+    // Parseo de ítem dicho por voz
     private fun parseSpokenItem(phrase: String): Pair<String, Int> {
         val p = phrase.lowercase().trim()
 
@@ -265,9 +335,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             "diez" -> 10
             else -> null
         }
-
-
-
 
         val raw = p.split(Regex("\\s+")).filter { it.isNotBlank() }
 
@@ -306,19 +373,17 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 "$marca ${i.name}$qty"
             }
         }
+        val pendientes = items.count { !it.purchased }
+        val encabezado = "Pendientes: $pendientes\n\n"
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, texto)
+            putExtra(Intent.EXTRA_TEXT, encabezado + texto)
         }
         startActivity(Intent.createChooser(intent, "Compartir lista"))
     }
 
-
-    // Para que no diga "uno leche"
     private fun buildAddedSpeech(name: String, qty: Int): String =
         if (qty == 1) "Agregado: $name" else "Agregado: $qty $name"
-
-
 
     override fun onDestroy() {
         tts?.stop()
