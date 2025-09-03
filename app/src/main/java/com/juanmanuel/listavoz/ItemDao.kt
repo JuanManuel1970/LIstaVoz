@@ -26,6 +26,17 @@ interface ItemDao {
     @Query("DELETE FROM items WHERE purchased = 1")
     suspend fun deletePurchased()
 
+    // Cambia la cantidad con un delta (asegura mínimo 1)
+    @Query("""
+    UPDATE items 
+    SET qty = CASE WHEN qty + :delta < 1 THEN 1 ELSE qty + :delta END 
+    WHERE id = :id
+""")
+    suspend fun changeQty(id: Long, delta: Int)
+
+    // (Opcional) setear una cantidad específica
+    @Query("UPDATE items SET qty = :qty WHERE id = :id")
+    suspend fun setQty(id: Long, qty: Int)
     // Renombrar un ítem (para el diálogo de edición)
     @Query("UPDATE items SET name = :newName WHERE id = :id")
     suspend fun rename(id: Long, newName: String)

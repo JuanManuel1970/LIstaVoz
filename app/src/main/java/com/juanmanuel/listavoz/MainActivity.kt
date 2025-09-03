@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardOptions
 
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -27,6 +28,8 @@ import androidx.room.PrimaryKey
 import kotlinx.coroutines.launch
 import androidx.compose.ui.text.input.KeyboardType
 import java.util.Locale
+
+
 
 import androidx.compose.runtime.rememberCoroutineScope
 
@@ -146,7 +149,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     Spacer(Modifier.height(12.dp))
 
                     // Acciones
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Button(
                             onClick = {
                                 val pendientes = uiItems.filter { !it.purchased }
@@ -184,6 +189,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         }
                     }
 
+
                     Spacer(Modifier.height(12.dp))
 
                     // Lista
@@ -193,7 +199,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     ) {
                         items(uiItems, key = { it.id }) { item ->
                             ListItem(
-                                headlineContent = { Text("${item.name} x${item.qty}") },
+                                headlineContent = { Text(item.name) },
                                 supportingContent = {
                                     Text(if (item.purchased) "Comprado" else "Pendiente")
                                 },
@@ -206,27 +212,32 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                                     )
                                 },
                                 trailingContent = {
-                                    Row {
-                                        TextButton(onClick = {
-                                            editing = item
-                                            newName = item.name
-                                        }) { Text("Editar") }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        // MENOS
+                                        TextButton(onClick = { scope.launch { dao.changeQty(item.id, -1) } }) { Text("−") }
 
-                                        TextButton(onClick = {
-                                            scope.launch { dao.deleteById(item.id) }
-                                        }) { Text("Eliminar") }
+                                        // Cantidad
+                                        Text(
+                                            text = "${item.qty}",
+                                            modifier = Modifier.width(28.dp),
+                                            textAlign = TextAlign.Center
+                                        )
+
+                                        // MÁS
+                                        TextButton(onClick = { scope.launch { dao.changeQty(item.id, +1) } }) { Text("+") }
+
+                                        Spacer(Modifier.width(8.dp))
+
+                                        // Eliminar
+                                        TextButton(onClick = { scope.launch { dao.deleteById(item.id) } }) { Text("Eliminar") }
                                     }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        editing = item
-                                        newName = item.name
-                                    }
+                                }
+
                             )
                             Divider()
                         }
                     }
+
 
                     // Diálogo de edición
                     if (editing != null) {
