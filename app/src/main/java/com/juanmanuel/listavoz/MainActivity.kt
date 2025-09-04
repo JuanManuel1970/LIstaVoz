@@ -183,93 +183,123 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
                         Spacer(Modifier.height(12.dp))
 
-                        // Acciones
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
+// Acciones
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Button(
-                                onClick = {
-                                    val pendientes = uiItems.filter { !it.purchased }
-                                    val texto = if (pendientes.isEmpty()) {
-                                        "No hay pendientes."
-                                    } else {
-                                        pendientes.joinToString(". ") { it.name + " (" + it.qty + ")" }
-                                    }
-                                    val encabezado = if (pendientes.size == 1) "Te falta: " else "Te faltan: "
-                                    speak(encabezado + texto)
-                                },
-                                enabled = ttsReady.value
-                            ) { Text("Leer pendientes") }
+                            // Fila superior
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Button(
+                                    onClick = {
+                                        val pendientes = uiItems.filter { !it.purchased }
+                                        val texto = if (pendientes.isEmpty()) {
+                                            "No hay pendientes."
+                                        } else {
+                                            pendientes.joinToString(". ") { it.name + " (" + it.qty + ")" }
+                                        }
+                                        val encabezado = if (pendientes.size == 1) "Te falta: " else "Te faltan: "
+                                        speak(encabezado + texto)
+                                    },
+                                    enabled = ttsReady.value
+                                ) { Text("Leer pendientes") }
 
-                            Spacer(Modifier.width(8.dp))
-
-                            Button(onClick = { tryVoiceAdd() }) { Text("Agregar por voz") }
-
-                            Spacer(Modifier.width(8.dp))
-
-                            Button(onClick = { shareList(uiItems) }) { Text("Compartir") }
-
-                            Spacer(Modifier.width(8.dp))
-
-                            Button(onClick = { scope.launch { dao.deletePurchased() } }) {
-                                Text("Eliminar comprados")
+                                Button(onClick = { tryVoiceAdd() }) { Text("Agregar por voz") }
                             }
 
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.height(12.dp))
 
-                            if (missingLang.value) {
-                                OutlinedButton(onClick = { installTtsData() }) {
-                                    Text("Instalar voz")
+                            // Compartir (debajo y centrado)
+                            Button(onClick = { shareList(uiItems) }) { Text("Compartir") }
+
+                            Spacer(Modifier.height(12.dp))
+
+                            // Fila inferior (resto de acciones)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Button(onClick = { scope.launch { dao.deletePurchased() } }) {
+                                    Text("Eliminar comprados")
+                                }
+
+                                if (missingLang.value) {
+                                    OutlinedButton(onClick = { installTtsData() }) {
+                                        Text("Instalar voz")
+                                    }
                                 }
                             }
                         }
+
 
                         Spacer(Modifier.height(12.dp))
 
                         // Lista
                         LazyColumn(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(0.dp) // usamos Divider, no hace falta extra
+                        )  {
                             items(uiItems, key = { it.id }) { item ->
-                                ListItem(
-                                    headlineContent = { Text(item.name) },
-                                    supportingContent = {
-                                        Text(if (item.purchased) "Comprado" else "Pendiente")
-                                    },
-                                    leadingContent = {
-                                        Checkbox(
-                                            checked = item.purchased,
-                                            onCheckedChange = {
-                                                scope.launch { dao.setPurchased(item.id, !item.purchased) }
-                                            }
-                                        )
-                                    },
-                                    trailingContent = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            // MENOS
-                                            TextButton(onClick = { scope.launch { dao.changeQty(item.id, -1) } }) { Text("−") }
-
-                                            // Cantidad
-                                            Text(
-                                                text = "${item.qty}",
-                                                modifier = Modifier.width(28.dp),
-                                                textAlign = TextAlign.Center
-                                            )
-
-                                            // MÁS
-                                            TextButton(onClick = { scope.launch { dao.changeQty(item.id, +1) } }) { Text("+") }
-
-                                            Spacer(Modifier.width(8.dp))
-
-                                            // Eliminar
-                                            TextButton(onClick = { scope.launch { dao.deleteById(item.id) } }) { Text("Eliminar") }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Check
+                                    Checkbox(
+                                        checked = item.purchased,
+                                        onCheckedChange = {
+                                            scope.launch { dao.setPurchased(item.id, !item.purchased) }
                                         }
+                                    )
+
+                                    Spacer(Modifier.width(8.dp))
+
+                                    // Título + estado
+                                    Column(
+                                        modifier = Modifier.weight(1f) // ocupa todo el ancho disponible seguro
+                                    ) {
+                                        Text(
+                                            text = item.name,
+                                            maxLines = 1
+                                            // overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = if (item.purchased) "Comprado" else "Pendiente",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
                                     }
-                                )
+
+                                    Spacer(Modifier.width(8.dp))
+
+                                    // Acciones derecha
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        TextButton(onClick = { scope.launch { dao.changeQty(item.id, -1) } }) { Text("−") }
+
+                                        Text(
+                                            text = "${item.qty}",
+                                            modifier = Modifier.widthIn(min = 28.dp),
+                                            textAlign = TextAlign.Center
+                                        )
+
+                                        TextButton(onClick = { scope.launch { dao.changeQty(item.id, +1) } }) { Text("+") }
+
+                                        Spacer(Modifier.width(8.dp))
+
+                                        TextButton(onClick = { scope.launch { dao.deleteById(item.id) } }) { Text("Eliminar") }
+                                    }
+                                }
                                 Divider()
                             }
+
                         }
+
 
                         // Diálogo de edición
                         if (editing != null) {
